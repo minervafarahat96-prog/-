@@ -116,19 +116,19 @@ function render(){
   if(!S.mode){a.innerHTML=vGate();return}
   if(S.mode==='app'){a.innerHTML=vApplicant();return}
   var v={dash:vDash,loans:vLoans,collect:vCollect,remind:vRemind,fund:vFund,more:vMore}[S.tab]();
-  a.innerHTML='<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>لوحة المسؤول</small></div></div>'+(ON?'<button class="l" onclick="pull()">تحديث</button> ':'')+'<button class="l" onclick="logout()">خروج</button></header><main>'+v+'</main>'+
+  a.innerHTML='<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>'+(ROLE==='editor'?'لوحة الموظف':'لوحة المسؤول')+'</small></div></div>'+(ON?'<button class="l" onclick="pull()">تحديث</button> ':'')+'<button class="l" onclick="logout()">خروج</button></header><main>'+v+'</main>'+
   '<nav>'+[['dash','الرئيسية'],['loans','القروض'],['collect','التحصيل'],['remind','التذكيرات'],['fund','الدعم'],['more','المزيد']].filter(function(x){return!(ROLE==='editor'&&(x[0]==='fund'||x[0]==='more'))}).map(function(x){return'<button class="'+(S.tab===x[0]?'on':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')+'</nav>'+
   (S.modal?S.modal:'');
 }
 function logout(){S.mode=null;ROLE=ON?null:'admin';PIN='';if(ON){D.loans=[];D.queue=[];D.fund=[]}location.hash='';render()}
 // ---------- الدخول ----------
 function vGate(){return'<div class="center"><img src="icon-192.png" alt="" style="width:120px;height:120px;border-radius:28px;margin-bottom:10px"><h1 style="color:var(--navy2)">خدمة يوحنا المعمدان</h1><p style="color:var(--mute)">اختاري نوع الدخول</p>'+
- '<div class="card"><h2>دخول الفريق</h2><input id="pin" type="password" inputmode="numeric" placeholder="الرقم السري" style="text-align:center"><p></p><button class="b" style="width:100%" onclick="adminIn()">دخول</button></div>'+
+ '<div class="card"><h2>دخول الفريق</h2>'+(ON?'<div class="row" style="margin-bottom:8px"><button class="'+(S.want==='editor'?'l':'b')+'" style="flex:1" onclick="S.want=\'admin\';render()">مسؤول</button><button class="'+(S.want==='editor'?'b':'l')+'" style="flex:1" onclick="S.want=\'editor\';render()">موظف</button></div>':'')+'<input id="pin" type="password" inputmode="numeric" placeholder="الرقم السري" style="text-align:center"><p></p><button class="b" style="width:100%" onclick="adminIn()">دخول</button></div>'+
  '<div class="card"><h2>مستفيد</h2><p style="color:var(--mute)">اعرفي قسطك وأشهرك المتبقية برقم القرض</p><button class="l" style="width:100%" onclick="S.mode=\'app\';render()">دخول المستفيد</button></div></div>'}
 function adminIn(){var p=document.getElementById('pin').value;
   if(!ON){if(p===D.pin){S.mode='admin';render()}else toast('الرقم السري غير صحيح');return}
   PIN=p;toast('جاري الدخول...');
-  api('login').then(function(r){if(!r.ok){PIN='';toast('الرقم السري غير صحيح');return}ROLE=r.role;S.mode='admin';S.tab='dash';return pull().then(function(){render()})}).catch(function(){PIN='';toast('تعذر الاتصال بالخادم')})}
+  api('login',{want:S.want==='editor'?'editor':'admin'}).then(function(r){if(!r.ok){PIN='';toast('الرقم السري غير صحيح لهذا النوع من الدخول');return}ROLE=r.role;S.mode='admin';S.tab='dash';return pull().then(function(){render()})}).catch(function(){PIN='';toast('تعذر الاتصال بالخادم')})}
 function lookup(){var no=g('an');if(!ON){AR=no;render();return}PIN='';api('app',{no:no,last4:g('al')}).then(function(r){AL=r.ok?r.loan:null;AR=no;render()}).catch(function(){toast('تعذر الاتصال')})}
 function vMoreOn(){return'<div class="card"><h2>نسخة احتياطية</h2><p style="color:var(--mute)">البيانات محفوظة في Google Sheets وتظهر لكل الأجهزة. نزّلي نسخة للاحتفاظ بها.</p><div class="row"><button class="b" onclick="exportData()">تنزيل نسخة</button><button class="l" onclick="document.getElementById(\'imp2\').click()">استيراد بيانات قديمة (دمج)</button></div><input id="imp2" type="file" accept=".json" style="display:none" onchange="importOld(this)"></div>'+
   '<div class="card"><h2>الأرقام السرية</h2><p style="color:var(--mute)">بتتغير من ورقة Settings جوه Google Sheet: adminPin للمسؤول وeditorPin للموظف.</p></div>'+
