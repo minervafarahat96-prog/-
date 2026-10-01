@@ -54,13 +54,31 @@ h2{font-size:17px;margin:4px 0 10px}
 </head>
 <body>
 <div id="app"></div>
+<script src="config.js"></script>
 <script>
 // ---------- التخزين ----------
 var KEY='loan_tracker_v1', mem=null;
 function blank(){return{pin:'1234',loans:[],fund:[]}}
 function load(){try{var s=localStorage.getItem(KEY);if(s)return JSON.parse(s)}catch(e){}return mem||blank()}
-var D=load();D.queue=D.queue||[];
-function save(){mem=D;try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('تعذر الحفظ على الجهاز، خدي نسخة احتياطية')}}
+var ON=!!window.API_URL;var D=ON?{loans:[],queue:[],fund:[],msg:''}:load();D.queue=D.queue||[];D.fund=D.fund||[];
+var SNAP={loans:{},queue:{},fund:{},msg:''},ROLE=ON?null:'admin',PIN='',CH=Promise.resolve(),T=null;
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+function ensureIds(){['loans','queue','fund'].forEach(function(c){(D[c]||[]).forEach(function(r){if(!r.id)r.id=uid()})})}
+ensureIds();
+function api(a,x){x=x||{};x.a=a;x.pin=PIN;return fetch(window.API_URL,{method:'POST',body:JSON.stringify(x)}).then(function(r){return r.json()})}
+function snap(){['loans','queue','fund'].forEach(function(c){SNAP[c]={};D[c].forEach(function(r){SNAP[c][r.id]=JSON.stringify(r)})});SNAP.msg=D.msg||''}
+function busy(){var e=document.activeElement;return S.modal||(e&&/INPUT|TEXTAREA|SELECT/.test(e.tagName))}
+function pull(){return api('get').then(function(r){if(!r.ok)throw 0;D.loans=r.loans||[];D.queue=(r.queue||[]).sort(function(a,b){return N(a.pos)-N(b.pos)});D.fund=r.fund||[];D.msg=r.msg||'';snap();if(S.mode&&!busy())render()}).catch(function(){toast('تعذر تحديث البيانات')})}
+function push(){var ops=[];D.queue.forEach(function(q,i){q.pos=String(i)});
+  ['loans','queue','fund'].forEach(function(c){var cur={};D[c].forEach(function(r){cur[r.id]=JSON.stringify(r)});
+    D[c].forEach(function(r){if(SNAP[c][r.id]!==cur[r.id])ops.push({c:c,t:'up',r:r})});
+    Object.keys(SNAP[c]).forEach(function(id){if(!(id in cur))ops.push({c:c,t:'del',id:id})});SNAP[c]=cur});
+  if((D.msg||'')!==SNAP.msg){ops.push({c:'msg',v:D.msg||''});SNAP.msg=D.msg||''}
+  if(!ops.length)return;
+  CH=CH.then(function(){return api('sync',{ops:ops})}).then(function(r){if(!r.ok){toast('لم يتم الحفظ');pull()}}).catch(function(){toast('لا يوجد اتصال، لم يتم الحفظ');pull()})}
+function saveSoon(){clearTimeout(T);T=setTimeout(save,900)}
+function save(){ensureIds();if(ON){push();return}mem=D;try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('تعذر الحفظ على الجهاز، خدي نسخة احتياطية')}}
+
 // ---------- أدوات ----------
 var AM=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -98,27 +116,37 @@ function render(){
   if(!S.mode){a.innerHTML=vGate();return}
   if(S.mode==='app'){a.innerHTML=vApplicant();return}
   var v={dash:vDash,loans:vLoans,collect:vCollect,remind:vRemind,fund:vFund,more:vMore}[S.tab]();
-  a.innerHTML='<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>لوحة المسؤول</small></div></div><button class="l" onclick="logout()">خروج</button></header><main>'+v+'</main>'+
-  '<nav>'+[['dash','الرئيسية'],['loans','القروض'],['collect','التحصيل'],['remind','التذكيرات'],['fund','الدعم'],['more','المزيد']].map(function(x){return'<button class="'+(S.tab===x[0]?'on':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')+'</nav>'+
+  a.innerHTML='<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>لوحة المسؤول</small></div></div>'+(ON?'<button class="l" onclick="pull()">تحديث</button> ':'')+'<button class="l" onclick="logout()">خروج</button></header><main>'+v+'</main>'+
+  '<nav>'+[['dash','الرئيسية'],['loans','القروض'],['collect','التحصيل'],['remind','التذكيرات'],['fund','الدعم'],['more','المزيد']].filter(function(x){return!(ROLE==='editor'&&(x[0]==='fund'||x[0]==='more'))}).map(function(x){return'<button class="'+(S.tab===x[0]?'on':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')+'</nav>'+
   (S.modal?S.modal:'');
 }
-function logout(){S.mode=null;location.hash='';render()}
+function logout(){S.mode=null;ROLE=ON?null:'admin';PIN='';if(ON){D.loans=[];D.queue=[];D.fund=[]}location.hash='';render()}
 // ---------- الدخول ----------
 function vGate(){return'<div class="center"><img src="icon-192.png" alt="" style="width:120px;height:120px;border-radius:28px;margin-bottom:10px"><h1 style="color:var(--navy2)">خدمة يوحنا المعمدان</h1><p style="color:var(--mute)">اختاري نوع الدخول</p>'+
- '<div class="card"><h2>مسؤول</h2><input id="pin" type="password" inputmode="numeric" placeholder="الرقم السري" style="text-align:center"><p></p><button class="b" style="width:100%" onclick="adminIn()">دخول</button></div>'+
+ '<div class="card"><h2>دخول الفريق</h2><input id="pin" type="password" inputmode="numeric" placeholder="الرقم السري" style="text-align:center"><p></p><button class="b" style="width:100%" onclick="adminIn()">دخول</button></div>'+
  '<div class="card"><h2>مستفيد</h2><p style="color:var(--mute)">اعرفي قسطك وأشهرك المتبقية برقم القرض</p><button class="l" style="width:100%" onclick="S.mode=\'app\';render()">دخول المستفيد</button></div></div>'}
-function adminIn(){if(document.getElementById('pin').value===D.pin){S.mode='admin';render()}else toast('الرقم السري غير صحيح')}
+function adminIn(){var p=document.getElementById('pin').value;
+  if(!ON){if(p===D.pin){S.mode='admin';render()}else toast('الرقم السري غير صحيح');return}
+  PIN=p;toast('جاري الدخول...');
+  api('login').then(function(r){if(!r.ok){PIN='';toast('الرقم السري غير صحيح');return}ROLE=r.role;S.mode='admin';S.tab='dash';return pull().then(function(){render()})}).catch(function(){PIN='';toast('تعذر الاتصال بالخادم')})}
+function lookup(){var no=g('an');if(!ON){AR=no;render();return}PIN='';api('app',{no:no,last4:g('al')}).then(function(r){AL=r.ok?r.loan:null;AR=no;render()}).catch(function(){toast('تعذر الاتصال')})}
+function vMoreOn(){return'<div class="card"><h2>نسخة احتياطية</h2><p style="color:var(--mute)">البيانات محفوظة في Google Sheets وتظهر لكل الأجهزة. نزّلي نسخة للاحتفاظ بها.</p><div class="row"><button class="b" onclick="exportData()">تنزيل نسخة</button><button class="l" onclick="document.getElementById(\'imp2\').click()">استيراد بيانات قديمة (دمج)</button></div><input id="imp2" type="file" accept=".json" style="display:none" onchange="importOld(this)"></div>'+
+  '<div class="card"><h2>الأرقام السرية</h2><p style="color:var(--mute)">بتتغير من ورقة Settings جوه Google Sheet: adminPin للمسؤول وeditorPin للموظف.</p></div>'+
+  '<div class="card"><h2>رابط المستفيد</h2><p style="color:var(--mute)">أضيفي <b dir="ltr">#applicant</b> في نهاية رابط التطبيق ليفتح على شاشة المستفيد مباشرة، واعملي له QR.</p></div>'}
+function importOld(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);if(!d.loans)throw 0;if(!confirm('سيتم دمج القروض والطلبات والدعم من الملف مع البيانات الحالية. استوردي الملف مرة واحدة بس. متأكدة؟'))return;
+  ['loans','queue','fund'].forEach(function(c){(d[c]||[]).forEach(function(x){x.id=uid();D[c].push(x)})});save();render();toast('تم الدمج')}catch(e){toast('الملف غير صالح')}};r.readAsText(f)}
+
 // ---------- الرئيسية ----------
 function vDash(){
   var f=fundCalc(),act=D.loans.filter(function(l){return!calc(l).done}),missed=0,dueNow=0;
   act.forEach(function(l){var c=calc(l);missed+=c.missed;dueNow+=N(l.monthly)});
   var remAll=0;D.loans.forEach(function(l){remAll+=calc(l).rem});
-  return'<div class="card big"><span style="color:var(--sky)">المتاح للتمويل الجديد الآن</span><div class="n">'+money(f.avail)+'</div>'+
-   '<label style="color:var(--sky)">تمويل جديد بمبلغ</label><input id="chk" type="number" inputmode="numeric" placeholder="اكتبي المبلغ" oninput="chk()"><div id="chkr" style="margin-top:8px;font-weight:700"></div></div>'+
+  return(ROLE==='editor'?'':'<div class="card big"><span style="color:var(--sky)">المتاح للتمويل الجديد الآن</span><div class="n">'+money(f.avail)+'</div>'+
+   '<label style="color:var(--sky)">تمويل جديد بمبلغ</label><input id="chk" type="number" inputmode="numeric" placeholder="اكتبي المبلغ" oninput="chk()"><div id="chkr" style="margin-top:8px;font-weight:700"></div></div>')+
    '<div class="grid"><div class="stat"><b>'+act.length+'</b><span>قروض جارية</span></div><div class="stat"><b>'+D.loans.length+'</b><span>إجمالي القروض</span></div>'+
    '<div class="stat"><b>'+money(dueNow)+'</b><span>أقساط شهرية مستحقة</span></div><div class="stat"><b style="color:var(--bad)">'+missed+'</b><span>أقساط فائتة</span></div>'+
    '<div class="stat"><b>'+money(remAll)+'</b><span>متبقي عند المستفيدين</span></div><div class="stat"><b>'+money(f.col)+'</b><span>تم تحصيله</span></div><div class="stat"><b>'+D.queue.length+'</b><span>في قائمة الانتظار</span></div><div class="stat"><b>'+money(D.queue.reduce(function(a,q){return a+N(q.amount)},0))+'</b><span>مطلوب للمنتظرين</span></div></div>'+
-   '<div class="card" style="margin-top:12px"><h2>ملخص الرصيد</h2><table><tr><td>دعم ورصيد افتتاحي</td><td>'+money(f.inc)+'</td></tr><tr><td>أقساط محصلة</td><td>'+money(f.col)+'</td></tr><tr><td>تمويلات خارجة</td><td>−'+money(f.out)+'</td></tr><tr><th>المتاح</th><th>'+money(f.avail)+'</th></tr></table></div>'+
+   (ROLE==='editor'?'':'<div class="card" style="margin-top:12px"><h2>ملخص الرصيد</h2><table><tr><td>دعم ورصيد افتتاحي</td><td>'+money(f.inc)+'</td></tr><tr><td>أقساط محصلة</td><td>'+money(f.col)+'</td></tr><tr><td>تمويلات خارجة</td><td>−'+money(f.out)+'</td></tr><tr><th>المتاح</th><th>'+money(f.avail)+'</th></tr></table></div>')+
    (D.loans.length?'':'<div class="card">ابدئي بإضافة أول قرض من تبويب «القروض»، وسجلي الرصيد الحالي من تبويب «الدعم».</div>')
 }
 function chk(){var v=N(document.getElementById('chk').value),f=fundCalc().avail,r=document.getElementById('chkr');
@@ -141,7 +169,7 @@ function loanCard(l){
   '<div>شهر التمويل: '+ymLabel(l.fmonth)+'</div><div>بداية الأقساط: '+ymLabel(l.start)+'</div><div>الشهر الحالي: '+ymLabel(CUR)+'</div>'+(N(l.support)?'<div>دعم الخدمة: '+money(l.support)+'</div>':'')+'</div>'+
   (c.missed?'<div style="margin-top:6px;color:var(--bad)">الأشهر الفائتة: '+c.missedList.map(ymLabel).join('، ')+'</div>':'')+
   (l.note?'<div style="margin-top:6px;color:var(--mute)">ملاحظة: '+esc(l.note)+'</div>':'')+
-  '<div class="row" style="margin-top:10px"><button class="l" onclick="editLoan('+i+')">تعديل</button><button class="d" onclick="delLoan('+i+')">حذف</button></div></div>'
+  '<div class="row" style="margin-top:10px"><button class="l" onclick="editLoan('+i+')">تعديل</button>'+(ROLE==='editor'?'':'<button class="d" onclick="delLoan('+i+')">حذف</button>')+'</div></div>'
 }
 var photoTmp=null;
 function editLoan(i,pre){
@@ -161,7 +189,7 @@ function editLoan(i,pre){
   '<div class="row" style="margin-top:14px"><button class="b" onclick="saveLoan('+(i==null?'null':i)+')">حفظ</button><button class="l" onclick="S.modal=null;render()">إلغاء</button></div></div></div>';
   render()
 }
-function pickPhoto(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r.onload=function(){var im=new Image();im.onload=function(){var s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);photoTmp=c.toDataURL('image/jpeg',.7);document.getElementById('pv').innerHTML='<img src="'+photoTmp+'" style="width:90px;border-radius:10px" alt="">'};im.src=r.result};r.readAsDataURL(f)}
+function pickPhoto(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r.onload=function(){var im=new Image();im.onload=function(){var s=Math.min(1,280/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);photoTmp=c.toDataURL('image/jpeg',.6);document.getElementById('pv').innerHTML='<img src="'+photoTmp+'" style="width:90px;border-radius:10px" alt="">'};im.src=r.result};r.readAsDataURL(f)}
 function g(id){return document.getElementById(id).value.trim()}
 function saveLoan(i){
   var o={owner:g('f_owner'),activity:g('f_act'),no:g('f_no'),phone:g('f_phone'),note:g('f_note'),total:N(g('f_tot')),monthly:N(g('f_mon')),fmonth:g('f_fm'),start:g('f_st'),support:N(g('f_sup')),photo:photoTmp};
@@ -196,10 +224,10 @@ function chips(){return'<div class="row" style="margin-bottom:10px"><button clas
 function vQueue(){
   var av=fundCalc().avail,cum=0;
   var rows=D.queue.map(function(q,i){cum+=N(q.amount);var ok=cum<=av;
-    return'<div class="card"><div class="row" style="justify-content:space-between"><b>'+(i+1)+'. '+esc(q.name)+'</b>'+(ok?'<span class="tag ok">ممكن الآن</span>':'<span class="tag bad">ينقص '+money(cum-av)+'</span>')+'</div>'+
+    return'<div class="card"><div class="row" style="justify-content:space-between"><b>'+(i+1)+'. '+esc(q.name)+'</b>'+(ROLE==='editor'?'':(ok?'<span class="tag ok">ممكن الآن</span>':'<span class="tag bad">ينقص '+money(cum-av)+'</span>'))+'</div>'+
     '<div style="color:var(--mute)">'+esc(q.activity)+(q.phone?' — '+esc(q.phone):'')+'</div><div>المبلغ المطلوب: <b>'+money(q.amount)+'</b>'+(N(q.monthly)?' — القسط المتوقع '+money(q.monthly):'')+'</div>'+(q.note?'<div style="color:var(--mute)">'+esc(q.note)+'</div>':'')+
-    '<div class="row" style="margin-top:8px"><button class="b" onclick="convertQ('+i+')">اعتماد وتحويل لقرض</button><button class="l" onclick="editQ('+i+')">تعديل</button><button class="l" onclick="moveQ('+i+',-1)">↑</button><button class="l" onclick="moveQ('+i+',1)">↓</button><button class="d" onclick="delQ('+i+')">حذف</button></div></div>'}).join('');
-  return chips()+'<div class="row" style="margin-bottom:10px"><span style="flex:1;color:var(--mute)">مرتبة حسب الأولوية، والمتاح الآن '+money(av)+'</span><button class="b" onclick="editQ()">+ طلب</button></div>'+(rows||'<div class="card">قائمة الانتظار فاضية. أضيفي أول طلب.</div>')
+    '<div class="row" style="margin-top:8px">'+(ROLE==='editor'?'':'<button class="b" onclick="convertQ('+i+')">اعتماد وتحويل لقرض</button>')+'<button class="l" onclick="editQ('+i+')">تعديل</button><button class="l" onclick="moveQ('+i+',-1)">↑</button><button class="l" onclick="moveQ('+i+',1)">↓</button>'+(ROLE==='editor'?'':'<button class="d" onclick="delQ('+i+')">حذف</button>')+'</div></div>'}).join('');
+  return chips()+'<div class="row" style="margin-bottom:10px"><span style="flex:1;color:var(--mute)">مرتبة حسب الأولوية'+(ROLE==='editor'?'':'، والمتاح الآن '+money(av))+'</span><button class="b" onclick="editQ()">+ طلب</button></div>'+(rows||'<div class="card">قائمة الانتظار فاضية. أضيفي أول طلب.</div>')
 }
 function editQ(i){
   var q=i==null?{name:'',phone:'',activity:'',amount:'',monthly:'',note:''}:D.queue[i];
@@ -228,33 +256,35 @@ function vRemind(){
   return'<div class="card"><label>شهر السداد المطلوب التذكير به</label><input type="month" value="'+esc(t)+'" onchange="S.rm=this.value||null;render()">'+
   '<p style="color:var(--mute);margin:8px 0 0">التذكيرات بتبدأ يوم 25 من الشهر اللي قبل شهر السداد، وبتستمر لحد آخر قسط. اللي سدد الشهر ده مش بيظهر.'+(now.getDate()<25&&!S.rm?' النهارده قبل يوم 25، فالمعروض هو الشهر الحالي.':'')+'</p></div>'+
   '<div class="card"><h2>مطلوب تذكيرهم ('+cnt+')</h2>'+(rows?'<table><tr><th>المستفيد</th><th>القسط</th><th></th></tr>'+rows+'</table>':'لا أحد مطلوب تذكيره في هذا الشهر.')+'</div>'+
-  '<div class="card"><h2>نص الرسالة</h2><textarea id="mt" rows="3" oninput="D.msg=this.value;save()">'+esc(D.msg||DEFMSG)+'</textarea><p style="color:var(--mute);margin:6px 0 0">استخدمي {name} للاسم و{month} للشهر و{amount} للقسط. زرار «واتساب» يفتح المحادثة برسالة جاهزة وتضغطي إرسال.</p></div>'
+  '<div class="card"><h2>نص الرسالة</h2><textarea id="mt" rows="3" '+(ON&&ROLE!=='admin'?'readonly ':'')+'oninput="D.msg=this.value;saveSoon()">'+esc(D.msg||DEFMSG)+'</textarea><p style="color:var(--mute);margin:6px 0 0">استخدمي {name} للاسم و{month} للشهر و{amount} للقسط. زرار «واتساب» يفتح المحادثة برسالة جاهزة وتضغطي إرسال.</p></div>'
 }
 // ---------- المزيد ----------
 function vMore(){
+  if(ON)return vMoreOn();
   return'<div class="card"><h2>نسخة احتياطية</h2><p style="color:var(--mute)">البيانات محفوظة على هذا الجهاز فقط. خدي نسخة بانتظام، واستخدميها لنقل البيانات لجهاز آخر.</p><div class="row"><button class="b" onclick="exportData()">تنزيل نسخة</button><button class="l" onclick="document.getElementById(\'imp\').click()">استرجاع نسخة</button></div><input id="imp" type="file" accept=".json" style="display:none" onchange="importData(this)"></div>'+
   '<div class="card"><h2>تغيير الرقم السري</h2><input id="np" type="password" inputmode="numeric" placeholder="رقم سري جديد"><p></p><button class="b" onclick="setPin()">حفظ</button></div>'+
   '<div class="card"><h2>رابط المستفيد</h2><p style="color:var(--mute)">أضيفي <b dir="ltr">#applicant</b> في نهاية رابط التطبيق ليفتح على شاشة المستفيد مباشرة، واعملي له QR.</p></div>'
 }
 function exportData(){var b=new Blob([JSON.stringify(D)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='loans-backup-'+CUR+'.json';document.body.appendChild(a);a.click();a.remove()}
-function importData(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);if(!d.loans||!d.fund)throw 0;if(confirm('سيتم استبدال البيانات الحالية. متأكدة؟')){D=d;D.queue=D.queue||[];save();render();toast('تم الاسترجاع')}}catch(e){toast('الملف غير صالح')}};r.readAsText(f)}
+function importData(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);if(!d.loans||!d.fund)throw 0;if(confirm('سيتم استبدال البيانات الحالية. متأكدة؟')){D=d;D.queue=D.queue||[];ensureIds();save();render();toast('تم الاسترجاع')}}catch(e){toast('الملف غير صالح')}};r.readAsText(f)}
 function setPin(){var p=g('np');if(p.length<4){toast('الرقم السري 4 أرقام على الأقل');return}D.pin=p;save();toast('تم التغيير')}
 // ---------- المستفيد ----------
-var AR=null;
+var AR=null,AL=null;
 function vApplicant(){
   var res='';
   if(AR!==null){
-    var l=D.loans.filter(function(x){return x.no===AR})[0];
-    if(!l)res='<div class="card">لم نجد قرضاً بهذا الرقم. راجعي الرقم.</div>';
+    var l=ON?AL:D.loans.filter(function(x){return x.no===AR})[0];
+    if(!l)res='<div class="card">لم نجد قرضاً بهذه البيانات. راجعي رقم القرض وآخر 4 أرقام من الموبايل المسجل.</div>';
     else{var c=calc(l);res='<div class="card"><div class="loan">'+(l.photo?'<img src="'+l.photo+'" alt="">':'<div class="ph"></div>')+'<div><b>'+esc(l.owner)+'</b><br><span style="color:var(--mute)">'+esc(l.activity)+'</span></div></div>'+
      '<div class="bar"><i style="width:'+(c.n?Math.round(c.paid/c.n*100):0)+'%"></i></div><div class="grid"><div class="stat"><b>'+money(l.total)+'</b><span>إجمالي التمويل</span></div><div class="stat"><b>'+money(l.monthly)+'</b><span>القسط الشهري</span></div>'+
      '<div class="stat"><b>'+c.paid+' من '+c.n+'</b><span>أقساط مسددة</span></div><div class="stat"><b>'+money(c.rem)+'</b><span>المتبقي</span></div></div>'+
      (c.done?'<p class="tag ok">تم سداد القرض بالكامل</p>':'<p>القسط القادم: <b>'+ymLabel(c.next)+'</b></p>')+
      (c.missed?'<p style="color:var(--bad)">أشهر لم تُسدد: '+c.missedList.map(ymLabel).join('، ')+'</p>':'')+'</div>'}
   }
-  return'<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>شاشة المستفيد</small></div></div><button class="l" onclick="AR=null;logout()">رجوع</button></header><main><div class="card"><label>رقم القرض</label><input id="an" inputmode="numeric"><p></p><button class="b" style="width:100%" onclick="AR=g(\'an\');render()">عرض بياناتي</button></div>'+res+'</main>'
+  return'<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>شاشة المستفيد</small></div></div><button class="l" onclick="AR=null;AL=null;logout()">رجوع</button></header><main><div class="card"><label>رقم القرض</label><input id="an" inputmode="numeric">'+(ON?'<label>آخر 4 أرقام من موبايلك المسجل</label><input id="al" inputmode="numeric" maxlength="4">':'')+'<p></p><button class="b" style="width:100%" onclick="lookup()">عرض بياناتي</button></div>'+res+'</main>'
 }
 if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}
+setInterval(function(){if(ON&&S.mode==='admin'&&ROLE&&!busy())pull()},60000);
 render();
 </script>
 </body>
