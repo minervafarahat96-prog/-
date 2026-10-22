@@ -119,7 +119,7 @@ function render(){
   var a=document.getElementById('app');
   if(!S.mode){a.innerHTML=vGate();return}
   if(S.mode==='app'){a.innerHTML=vApplicant();return}
-  var v={dash:vDash,loans:vLoans,collect:vCollect,remind:vRemind,fund:vFund,more:vMore}[S.tab]();
+  var v={dash:vDash,loans:vLoans,collect:vCollect,remind:vRemind,fund:vFund,more:function(){return vMore()+renumCard()}}[S.tab]();
   a.innerHTML='<header><div style="display:flex;gap:10px;align-items:center"><img src="logo-light.png" alt="" style="height:42px;width:42px"><div><h1>خدمة يوحنا المعمدان</h1><small>'+(ROLE==='editor'?'لوحة الموظف':'لوحة المسؤول')+'</small></div></div>'+(ON?'<button class="l" onclick="pull()">تحديث</button> ':'')+'<button class="l" onclick="logout()">خروج</button></header><main>'+v+'</main>'+
   '<nav>'+[['dash','الرئيسية'],['loans','القروض'],['collect','التحصيل'],['remind','التذكيرات'],['fund','الدعم'],['more','المزيد']].filter(function(x){return!(ROLE==='editor'&&(x[0]==='fund'||x[0]==='more'))}).map(function(x){return'<button class="'+(S.tab===x[0]?'on':'')+'" onclick="go(\''+x[0]+'\')">'+x[1]+'</button>'}).join('')+'</nav>'+
   (S.modal?S.modal:'');
@@ -176,14 +176,29 @@ function loanCard(l){
   '<div class="row" style="margin-top:10px"><button class="l" onclick="editLoan('+i+')">تعديل</button>'+(ROLE==='editor'?'':'<button class="d" onclick="delLoan('+i+')">حذف</button>')+'</div></div>'
 }
 var photoTmp=null;
-function editLoan(i,pre){
+function renumCard(){return'<div class="card"><h2>إعادة ترقيم القروض</h2><p style="color:var(--mute)">يرقّم كل القروض بأرقام متسلسلة (001، 002، ...) حسب شهر التمويل. أرقام القروض هتتغير، فلازم تبلّغي المستفيدين بأرقامهم الجديدة. بينزل ملف فيه الأرقام القديمة والجديدة.</p><button class="l" onclick="renumber()">إعادة الترقيم</button></div>'}
+function renumber(){
+  if(ROLE!=='admin'){toast('للمسؤول فقط');return}
+  if(!D.loans.length){toast('لا توجد قروض');return}
+  if(!confirm('سيتم إعادة ترقيم '+D.loans.length+' قرض بأرقام متسلسلة حسب شهر التمويل، وسيتغير رقم كل قرض. المستفيدون محتاجون أرقامهم الجديدة. سينزل ملف بالأرقام القديمة والجديدة. متأكدة؟'))return;
+  var arr=D.loans.map(function(l,i){return{l:l,i:i}});
+  arr.sort(function(a,b){var x=String(a.l.fmonth||'').localeCompare(String(b.l.fmonth||''));if(x)return x;x=String(a.l.start||'').localeCompare(String(b.l.start||''));return x||a.i-b.i});
+  var w=Math.max(3,String(arr.length).length),rows=['\uFEFFالاسم,الرقم القديم,الرقم الجديد'];
+  arr.forEach(function(o,k){var n=String(k+1);while(n.length<w)n='0'+n;var q=function(x){return String(x).replace(/"/g,'""')};rows.push('"'+q(o.l.owner)+'","=""'+q(o.l.no)+'""","=""'+n+'"""');o.l.no=n});
+  save();render();
+  var b=new Blob([rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='loan-numbers-old-new.csv';document.body.appendChild(a);a.click();a.remove();
+  toast('تمت إعادة الترقيم')
+}
+function nextNo(){var mx=0,w=0,z=false;D.loans.forEach(function(l){var x=String(l.no||'').trim();if(/^\d+$/.test(x)){var v=parseInt(x,10);if(v>mx)mx=v;if(x.length>w)w=x.length;if(x.charAt(0)==='0')z=true}});var n=String(mx+1);if(z)while(n.length<w)n='0'+n;return n}
+function editLoan(i,pre,skip){
+  if(ON&&i==null&&!skip){toast('جاري تجهيز الرقم...');pull().then(function(){editLoan(i,pre,1)});return}
   var l=i==null?{owner:'',activity:'',no:'',phone:'',note:'',total:'',monthly:'',fmonth:CUR,start:CUR,support:'',paid:{},deduct:true}:D.loans[i];
-  if(i==null&&pre){for(var kk in pre)l[kk]=pre[kk]}S.fromQ=null;photoTmp=l.photo||null;
+  if(i==null&&pre){for(var kk in pre)l[kk]=pre[kk]}if(!pre)S.fromQ=null;if(i==null&&!l.no)l.no=nextNo();photoTmp=l.photo||null;
   var owners=[];D.loans.forEach(function(x){if(owners.indexOf(x.owner)<0)owners.push(x.owner)});
   S.modal='<div class="modal"><div><h2>'+(i==null?'إضافة قرض':'تعديل قرض')+'</h2>'+
   '<label>اسم صاحب المشروع</label><input id="f_owner" list="ol" value="'+esc(l.owner)+'"><datalist id="ol">'+owners.map(function(o){return'<option value="'+esc(o)+'">'}).join('')+'</datalist>'+
   '<label>نوع النشاط</label><input id="f_act" value="'+esc(l.activity)+'">'+
-  '<label>رقم القرض</label><input id="f_no" value="'+esc(l.no)+'">'+'<label>رقم الموبايل (واتساب)</label><input id="f_phone" type="tel" inputmode="tel" placeholder="01012345678" value="'+esc(l.phone)+'">'+
+  '<label>رقم القرض (تلقائي، ممكن تعدليه)</label><input id="f_no" value="'+esc(l.no)+'">'+'<label>رقم الموبايل (واتساب)</label><input id="f_phone" type="tel" inputmode="tel" placeholder="01012345678" value="'+esc(l.phone)+'">'+
   '<label>ملاحظة القرض</label><textarea id="f_note" rows="2">'+esc(l.note)+'</textarea>'+
   '<div class="grid"><div><label>إجمالي التمويل (ج.م)</label><input id="f_tot" type="number" inputmode="numeric" value="'+esc(l.total)+'"></div><div><label>القسط الشهري (ج.م)</label><input id="f_mon" type="number" inputmode="numeric" value="'+esc(l.monthly)+'"></div>'+
   '<div><label>شهر التمويل</label><input id="f_fm" type="month" value="'+esc(l.fmonth)+'"></div><div><label>شهر بداية الأقساط</label><input id="f_st" type="month" value="'+esc(l.start)+'"></div></div>'+
