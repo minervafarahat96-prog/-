@@ -183,9 +183,9 @@ function chk(){var v=N(document.getElementById('chk').value),f=fundCalc().avail,
 // ---------- القروض ----------
 function vLoans(){
   if(S.lt==='queue')return vQueue();
-  var q=S.q.trim(),list=D.loans.filter(function(l){return matchQ(l,q)});
+  var q=S.q.trim(),list=D.loans.filter(function(l){return matchQ(l,q)&&(calc(l).done===(S.lt==='done'))});
   return chips()+'<div class="row" style="margin-bottom:10px"><input placeholder="بحث بالاسم أو الموبايل أو رقم القرض أو النشاط" value="'+esc(S.q)+'" oninput="S.q=this.value;render();var e=document.querySelector(\'main input\');e.focus();e.setSelectionRange(99,99)" style="flex:1"><button class="b" onclick="editLoan()">+ قرض</button></div>'+
-  (list.length?list.map(loanCard).join(''):'<div class="card">لا توجد قروض مطابقة.</div>')
+  (list.length?list.map(loanCard).join(''):'<div class="card">'+(S.lt==='done'?'لا توجد قروض مسددة بعد.':'لا توجد قروض مطابقة.')+'</div>')
 }
 function loanCard(l){
   var c=calc(l),p=c.n?Math.round(c.paid/c.n*100):0,i=D.loans.indexOf(l);
@@ -247,15 +247,19 @@ function delLoan(i){if(confirm('حذف قرض '+D.loans[i].owner+' نهائيا�
 // ---------- التحصيل ----------
 function matchQ(l,q){q=String(q||'').trim().toLowerCase();if(!q)return true;var h=(l.owner+' '+l.no+' '+l.activity).toLowerCase();if(h.indexOf(q)>-1)return true;var d=q.replace(/\D/g,'');return d.length>1&&String(l.phone||'').replace(/\D/g,'').indexOf(d)>-1}
 function vCollect(){
-  var m=S.collectMonth,mv=ym(m),tot=0,exp=0;
-  var rows=D.loans.map(function(l,i){var st=ym(l.start),n=calc(l).n;if(st==null||mv<st||mv>st+n-1)return'';
-    var p=l.paid&&l.paid[m],mo=expAt(l,m),a=p?pAmt(l,m):mo;exp+=mo;if(p&&String(p).charAt(0)==='c')tot+=a;
-    if(!matchQ(l,S.cq))return'';var tag=p?(a<mo?' <span class="tag bad">جزئي</span>':a>mo?' <span class="tag ok">أكتر من القسط</span>':' <span class="tag ok">مسدد</span>'):'';
+  var m=S.collectMonth,mv=ym(m),tot=0,exp=0,cnt={all:0,paid:0,part:0,none:0},cf=S.cf||'all',items=[];
+  D.loans.forEach(function(l,i){var st=ym(l.start),c=calc(l),n=c.n;if(st==null||mv<st||mv>st+n-1)return;
+    var p=l.paid&&l.paid[m];if(c.done&&!p)return;
+    var mo=expAt(l,m),a=p?pAmt(l,m):mo;exp+=mo;if(p&&String(p).charAt(0)==='c')tot+=a;
+    var s2=p?(a<mo-0.001?'part':'paid'):'none';cnt.all++;cnt[s2]++;items.push({l:l,i:i,p:p,mo:mo,a:a,st:s2})});
+  var rows=items.filter(function(x){return(cf==='all'||x.st===cf)&&matchQ(x.l,S.cq)}).map(function(x){var l=x.l,i=x.i,p=x.p,a=x.a,mo=x.mo;
+    var tag=p?(a<mo-0.001?' <span class="tag bad">جزئي</span>':a>mo+0.001?' <span class="tag ok">أكتر من القسط</span>':' <span class="tag ok">مسدد</span>'):'';
     return'<tr><td><b>'+esc(l.owner)+'</b>'+tag+'<br><span style="color:var(--mute)">#'+esc(l.no)+' — القسط '+money(mo)+'</span></td><td><input type="number" inputmode="numeric" id="am'+i+'" value="'+a+'" style="width:96px"></td><td><button class="b" onclick="payAmt('+i+')">'+(p?'تعديل':'تسجيل')+'</button>'+(p?' <button class="d" onclick="unpay('+i+')">إلغاء</button>':'')+'</td></tr>'}).join('');
+  var fl=[['all','الكل'],['paid','تم التحصيل'],['part','جزئي'],['none','لم يتم']].map(function(x){return'<button class="'+(cf===x[0]?'b':'l')+'" onclick="S.cf=\''+x[0]+'\';render()">'+x[1]+' ('+cnt[x[0]]+')</button>'}).join('');
   return'<div class="card"><label>شهر التحصيل</label><input type="month" value="'+esc(m)+'" onchange="S.collectMonth=this.value||CUR;render()"></div>'+
-  '<div class="card"><input id="cq" placeholder="بحث بالاسم أو رقم الموبايل أو رقم القرض" value="'+esc(S.cq||'')+'" oninput="S.cq=this.value;render();var e=document.getElementById(\'cq\');e.focus();e.setSelectionRange(99,99)"></div>'+
+  '<div class="card"><input id="cq" placeholder="بحث بالاسم أو رقم الموبايل أو رقم القرض" value="'+esc(S.cq||'')+'" oninput="S.cq=this.value;render();var e=document.getElementById(\'cq\');e.focus();e.setSelectionRange(99,99)"><div class="row" style="margin-top:10px">'+fl+'</div></div>'+
   '<div class="grid"><div class="stat"><b>'+money(exp)+'</b><span>المطلوب هذا الشهر</span></div><div class="stat"><b>'+money(tot)+'</b><span>تم تحصيله</span></div></div>'+
-  '<div class="card" style="margin-top:12px">'+(rows?'<p style="color:var(--mute);margin:0 0 8px">اكتبي المبلغ اللي اتدفع فعلاً (أقل أو أكتر من القسط) واضغطي تسجيل.</p><table><tr><th>المستفيد</th><th>المبلغ</th><th></th></tr>'+rows+'</table>':(S.cq?'لا نتائج مطابقة للبحث.':'لا أقساط مستحقة في هذا الشهر.'))+'</div>'
+  '<div class="card" style="margin-top:12px">'+(rows?'<p style="color:var(--mute);margin:0 0 8px">اكتبي المبلغ اللي اتدفع فعلاً (أقل أو أكتر من القسط) واضغطي تسجيل.</p><table><tr><th>المستفيد</th><th>المبلغ</th><th></th></tr>'+rows+'</table>':((S.cq||cf!=='all')?'لا نتائج مطابقة.':'لا أقساط مستحقة في هذا الشهر.'))+'</div>'
 }
 function payAmt(i){var l=D.loans[i],a=N(document.getElementById('am'+i).value);if(a<=0){toast('اكتبي مبلغاً أكبر من صفر');return}
   l.paid=l.paid||{};var old=l.paid[S.collectMonth],t=old?String(old).charAt(0):'c';l.paid[S.collectMonth]=(Math.abs(a-expAt(l,S.collectMonth))<0.001)?t:t+':'+a;save();render();toast('تم التسجيل')}
@@ -268,7 +272,9 @@ function vFund(){
 function addFund(){var a=N(g('d_amt'));if(!a){toast('اكتبي المبلغ');return}D.fund.push({amount:a,src:g('d_src'),date:g('d_dt')});save();render();toast('تمت الإضافة')}
 function delFund(i){if(confirm('حذف هذا البند؟')){D.fund.splice(i,1);save();render()}}
 // ---------- قائمة الانتظار ----------
-function chips(){return'<div class="row" style="margin-bottom:10px"><button class="'+(S.lt!=='queue'?'b':'l')+'" onclick="S.lt=\'loans\';render()">القروض ('+D.loans.length+')</button><button class="'+(S.lt==='queue'?'b':'l')+'" onclick="S.lt=\'queue\';render()">قائمة الانتظار ('+D.queue.length+')</button></div>'}
+function chips(){var act=0,dn=0;D.loans.forEach(function(l){if(calc(l).done)dn++;else act++});
+  var lt=S.lt||'loans';function b(k,t,n){return'<button class="'+(lt===k?'b':'l')+'" onclick="S.lt=\''+k+'\';render()">'+t+' ('+n+')</button>'}
+  return'<div class="row" style="margin-bottom:10px">'+b('loans','الجارية',act)+b('done','المسددة',dn)+b('queue','الانتظار',D.queue.length)+'</div>'}
 function vQueue(){
   var av=fundCalc().avail,cum=0;
   var rows=D.queue.map(function(q,i){cum+=N(q.amount);var ok=cum<=av;
