@@ -89,17 +89,38 @@ function ymStr(v){return Math.floor(v/12)+'-'+String(v%12+1).padStart(2,'0')}
 function ymLabel(s){var v=ym(s);return v==null?'—':AM[v%12]+' '+Math.floor(v/12)}
 var now=new Date(), CUR=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
 function toast(m){var t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove()},2200)}
-function pAmt(l,k){var v=l.paid&&l.paid[k];if(!v)return 0;var x=String(v),i=x.indexOf(':');return i>0?N(x.slice(i+1)):N(l.monthly)}
+function planOf(l){var p=l.paid&&l.paid._plan;return(Array.isArray(p)&&p.length)?p:null}
+function sched(l){
+  var tot=N(l.total),m=N(l.monthly),plan=planOf(l),out=[],left=tot,i;
+  if(plan&&plan[0].length===3){var st0=ym(l.start);if(st0==null||m<=0)return[];
+    for(i=0;left>0.001&&i<600;i++){var kk=st0+i,aa=m;plan.forEach(function(r){if(kk>=ym(r[0])&&kk<=ym(r[1])&&N(r[2])>0)aa=N(r[2])});var xx=Math.min(aa,left);out.push(xx);left-=xx}
+    return out}
+  if(!plan){if(m<=0)return[];var n=Math.ceil(tot/m);for(i=0;i<n;i++)out.push(i===n-1?tot-(n-1)*m:m);return out}
+  for(var s=0;s<plan.length&&left>0.001;s++){var c=Math.floor(N(plan[s][0])),a=N(plan[s][1]);if(a<=0)continue;var last=(s===plan.length-1),k=0;
+    while(left>0.001&&(last||k<c)&&out.length<600){var x=Math.min(a,left);out.push(x);left-=x;k++}}
+  return out
+}
+function expAt(l,k){var st=ym(l.start),i=ym(k)-st,S_=sched(l);return(st!=null&&i>=0&&i<S_.length)?S_[i]:N(l.monthly)}
+function expDue(l,k){var st=ym(l.start),i=ym(k)-st,S_=sched(l);return(st!=null&&i>=0&&i<S_.length)?S_[i]:0}
+function pAmt(l,k){var v=l.paid&&l.paid[k];if(!v)return 0;var x=String(v),i=x.indexOf(':');return i>0?N(x.slice(i+1)):expAt(l,k)}
+function planText(l){var p=planOf(l);if(!p)return money(l.monthly);
+  if(p[0].length===3)return p.map(function(r){return Math.round(N(r[2])).toLocaleString('en-US')+' ('+(r[0]===r[1]?ymLabel(r[0]):ymLabel(r[0])+' – '+ymLabel(r[1]))+')'}).join('، ')+'، والباقي '+Math.round(N(l.monthly)).toLocaleString('en-US')+' ج.م';
+  return p.map(function(x,i){var a=Math.round(N(x[1])).toLocaleString('en-US');return i<p.length-1?a+' × '+Math.floor(N(x[0]))+' شهر':(p.length>1?'ثم ':'')+a+' ج.م'}).join('، ')}
+function planForm(l){var p=planOf(l)||[],rs=[];
+  if(p.length&&p[0].length===3)rs=p;
+  else if(p.length>1){var cur=ym(l.start);p.slice(0,-1).forEach(function(x){var c=Math.floor(N(x[0]));if(c>0&&cur!=null){rs.push([ymStr(cur),ymStr(cur+c-1),N(x[1])]);cur+=c}})}
+  function row(n,r){r=r||['','',''];return'<div class="grid"><div><label>من شهر</label><input id="f_r'+n+'f" type="month" value="'+esc(r[0])+'"></div><div><label>إلى شهر</label><input id="f_r'+n+'t" type="month" value="'+esc(r[1])+'"></div></div><label>بمبلغ (ج.م)</label><input id="f_r'+n+'a" type="number" inputmode="numeric" value="'+esc(r[2])+'">'}
+  return'<div class="card" style="margin:10px 0"><b>أقساط مختلفة حسب الشهر (اختياري)</b><p style="color:var(--mute);margin:4px 0">لو القسط مش ثابت: اختاري من أي شهر لأي شهر بمبلغ مختلف. باقي الشهور بالمبلغ المكتوب في خانة «القسط الشهري».</p>'+row(1,rs[0])+'<div style="height:10px"></div>'+row(2,rs[1])+'</div>'}
+function plan_(o,segs){if(segs.length)o.paid._plan=segs;else delete o.paid._plan}
 function calc(l,curStr){
-  var cur=ym(curStr||CUR),st=ym(l.start),m=N(l.monthly),tot=N(l.total);
-  var n=m>0?Math.ceil(tot/m):0;
+  var cur=ym(curStr||CUR),st=ym(l.start),S_=sched(l),n=S_.length;
   var due=st==null?0:Math.max(0,Math.min(n,cur-st+1));
-  var paidSum=0;Object.keys(l.paid||{}).forEach(function(k){paidSum+=pAmt(l,k)});
+  var paidSum=0;Object.keys(l.paid||{}).forEach(function(k){if(k.charAt(0)!=='_')paidSum+=pAmt(l,k)});
   var credit=0,covered=0,missed=0,missedList=[],short=0,next=null;
-  for(var i=0;i<n&&st!=null;i++){var k=ymStr(st+i),mi=(i===n-1)?tot-(n-1)*m:m,a=pAmt(l,k)+credit;
+  for(var i=0;i<n&&st!=null;i++){var k=ymStr(st+i),mi=S_[i],a=pAmt(l,k)+credit;
     if(a>=mi-0.001){credit=a-mi;covered++}
     else{credit=0;if(next===null)next=k;if(i<due){missed++;missedList.push(k);short+=mi-a}}}
-  var rem=Math.max(0,tot-paidSum);
+  var rem=Math.max(0,N(l.total)-paidSum);
   return{n:n,due:due,paid:covered,missed:missed,missedList:missedList,short:short,rem:rem,done:n>0&&rem<=0.001,next:rem<=0.001?null:next}
 }
 function fundCalc(){
@@ -143,7 +164,7 @@ function importOld(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r
 // ---------- الرئيسية ----------
 function vDash(){
   var f=fundCalc(),act=D.loans.filter(function(l){return!calc(l).done}),missed=0,dueNow=0;
-  act.forEach(function(l){var c=calc(l);missed+=c.missed;dueNow+=N(l.monthly)});
+  act.forEach(function(l){var c=calc(l);missed+=c.missed;dueNow+=expDue(l,CUR)});
   var remAll=0;D.loans.forEach(function(l){remAll+=calc(l).rem});
   return(ROLE==='editor'?'':'<div class="card big"><span style="color:var(--sky)">المتاح للتمويل الجديد الآن</span><div class="n">'+money(f.avail)+'</div>'+
    '<label style="color:var(--sky)">تمويل جديد بمبلغ</label><input id="chk" type="number" inputmode="numeric" placeholder="اكتبي المبلغ" oninput="chk()"><div id="chkr" style="margin-top:8px;font-weight:700"></div></div>')+
@@ -169,7 +190,7 @@ function loanCard(l){
   '<div style="flex:1"><b>'+esc(l.owner)+'</b> <span class="tag">#'+esc(l.no)+'</span><br><span style="color:var(--mute)">'+esc(l.activity)+(l.phone?' — '+esc(l.phone):'')+'</span></div>'+
   (c.done?'<span class="tag ok">مكتمل</span>':c.missed?'<span class="tag bad">فائت '+c.missed+'</span>':'<span class="tag ok">منتظم</span>')+'</div>'+
   '<div class="bar"><i style="width:'+p+'%"></i></div>'+
-  '<div class="grid"><div>التمويل: <b>'+money(l.total)+'</b></div><div>القسط: <b>'+money(l.monthly)+'</b></div><div>دفع: <b>'+c.paid+'/'+c.n+'</b></div><div>متبقي: <b>'+money(c.rem)+'</b></div>'+
+  '<div class="grid"><div>التمويل: <b>'+money(l.total)+'</b></div><div>القسط: <b>'+planText(l)+'</b></div><div>دفع: <b>'+c.paid+'/'+c.n+'</b></div><div>متبقي: <b>'+money(c.rem)+'</b></div>'+
   '<div>شهر التمويل: '+ymLabel(l.fmonth)+'</div><div>بداية الأقساط: '+ymLabel(l.start)+'</div><div>الشهر الحالي: '+ymLabel(CUR)+'</div>'+(N(l.support)?'<div>دعم الخدمة: '+money(l.support)+'</div>':'')+'</div>'+
   (c.missed?'<div style="margin-top:6px;color:var(--bad)">الأشهر الفائتة: '+c.missedList.map(ymLabel).join('، ')+' — ناقص '+money(c.short)+'</div>':'')+
   (l.note?'<div style="margin-top:6px;color:var(--mute)">ملاحظة: '+esc(l.note)+'</div>':'')+
@@ -200,9 +221,9 @@ function editLoan(i,pre,skip){
   '<label>نوع النشاط</label><input id="f_act" value="'+esc(l.activity)+'">'+
   '<label>رقم القرض (تلقائي، ممكن تعدليه)</label><input id="f_no" value="'+esc(l.no)+'">'+'<label>رقم الموبايل (واتساب)</label><input id="f_phone" type="tel" inputmode="tel" placeholder="01012345678" value="'+esc(l.phone)+'">'+
   '<label>ملاحظة القرض</label><textarea id="f_note" rows="2">'+esc(l.note)+'</textarea>'+
-  '<div class="grid"><div><label>إجمالي التمويل (ج.م)</label><input id="f_tot" type="number" inputmode="numeric" value="'+esc(l.total)+'"></div><div><label>القسط الشهري (ج.م)</label><input id="f_mon" type="number" inputmode="numeric" value="'+esc(l.monthly)+'"></div>'+
+  '<div class="grid"><div><label>إجمالي التمويل (ج.م)</label><input id="f_tot" type="number" inputmode="numeric" value="'+esc(l.total)+'"></div><div><label>القسط الشهري، أو باقي الشهور (ج.م)</label><input id="f_mon" type="number" inputmode="numeric" value="'+esc(l.monthly)+'"></div>'+
   '<div><label>شهر التمويل</label><input id="f_fm" type="month" value="'+esc(l.fmonth)+'"></div><div><label>شهر بداية الأقساط</label><input id="f_st" type="month" value="'+esc(l.start)+'"></div></div>'+
-  '<label>إجمالي دعم الخدمة (ج.م) إن وجد</label><input id="f_sup" type="number" inputmode="numeric" value="'+esc(l.support)+'">'+
+  planForm(l)+'<label>إجمالي دعم الخدمة (ج.م) إن وجد</label><input id="f_sup" type="number" inputmode="numeric" value="'+esc(l.support)+'">'+
   (i==null?'<label>عدد الأقساط المدفوعة قبل تسجيله هنا (للقروض القديمة)</label><input id="f_prepaid" type="number" inputmode="numeric" value="0"><label><input type="checkbox" id="f_ded" style="width:auto" checked> قرض جديد: يُخصم من الرصيد المتاح (شيلي العلامة للقروض القديمة)</label>':'')+
   '<label>صورة المشروع (اختياري)</label><input type="file" accept="image/*" onchange="pickPhoto(this)"><div id="pv" style="margin-top:6px">'+(l.photo?'<img src="'+l.photo+'" style="width:90px;border-radius:10px" alt="">':'')+'</div>'+
   '<div class="row" style="margin-top:14px"><button class="b" onclick="saveLoan('+(i==null?'null':i)+')">حفظ</button><button class="l" onclick="S.modal=null;render()">إلغاء</button></div></div></div>';
@@ -212,11 +233,11 @@ function pickPhoto(inp){var f=inp.files[0];if(!f)return;var r=new FileReader();r
 function g(id){return document.getElementById(id).value.trim()}
 function saveLoan(i){
   var o={owner:g('f_owner'),activity:g('f_act'),no:g('f_no'),phone:g('f_phone'),note:g('f_note'),total:N(g('f_tot')),monthly:N(g('f_mon')),fmonth:g('f_fm'),start:g('f_st'),support:N(g('f_sup')),photo:photoTmp};
-  if(!o.owner||!o.no||!o.total||!o.monthly||!o.start){toast('املئي الاسم ورقم القرض والتمويل والقسط وبداية الأقساط');return}
+  var segs=[];[1,2].forEach(function(n){var f=g('f_r'+n+'f'),t=g('f_r'+n+'t'),a=N(g('f_r'+n+'a'));if(f&&a>0){t=t||f;if(ym(t)<ym(f)){var z=f;f=t;t=z}segs.push([f,t,a])}});if(!o.owner||!o.no||!o.total||!o.monthly||!o.start){toast('املئي الاسم ورقم القرض والتمويل والقسط وبداية الأقساط');return}
   if(D.loans.some(function(x,k){return k!==i&&x.no===o.no})){toast('رقم القرض مستخدم من قبل');return}
   if(i==null){o.paid={};o.deduct=document.getElementById('f_ded').checked;
     var pp=N(g('f_prepaid'));for(var k=0;k<pp;k++)o.paid[ymStr(ym(o.start)+k)]='h';
-    D.loans.push(o);if(S.fromQ!=null){D.queue.splice(S.fromQ,1);S.fromQ=null}}else{var old=D.loans[i];o.paid=old.paid;o.deduct=old.deduct;D.loans[i]=o}
+    plan_(o,segs);D.loans.push(o);if(S.fromQ!=null){D.queue.splice(S.fromQ,1);S.fromQ=null}}else{var old=D.loans[i];o.paid=old.paid;o.deduct=old.deduct;plan_(o,segs);D.loans[i]=o}
   save();S.modal=null;render();toast('تم الحفظ')
 }
 function delLoan(i){if(confirm('حذف قرض '+D.loans[i].owner+' نهائياً؟')){D.loans.splice(i,1);save();render()}}
@@ -225,7 +246,7 @@ function matchQ(l,q){q=String(q||'').trim().toLowerCase();if(!q)return true;var 
 function vCollect(){
   var m=S.collectMonth,mv=ym(m),tot=0,exp=0;
   var rows=D.loans.map(function(l,i){var st=ym(l.start),n=calc(l).n;if(st==null||mv<st||mv>st+n-1)return'';
-    var p=l.paid&&l.paid[m],a=p?pAmt(l,m):N(l.monthly),mo=N(l.monthly);exp+=mo;if(p&&String(p).charAt(0)==='c')tot+=a;
+    var p=l.paid&&l.paid[m],mo=expAt(l,m),a=p?pAmt(l,m):mo;exp+=mo;if(p&&String(p).charAt(0)==='c')tot+=a;
     if(!matchQ(l,S.cq))return'';var tag=p?(a<mo?' <span class="tag bad">جزئي</span>':a>mo?' <span class="tag ok">أكتر من القسط</span>':' <span class="tag ok">مسدد</span>'):'';
     return'<tr><td><b>'+esc(l.owner)+'</b>'+tag+'<br><span style="color:var(--mute)">#'+esc(l.no)+' — القسط '+money(mo)+'</span></td><td><input type="number" inputmode="numeric" id="am'+i+'" value="'+a+'" style="width:96px"></td><td><button class="b" onclick="payAmt('+i+')">'+(p?'تعديل':'تسجيل')+'</button>'+(p?' <button class="d" onclick="unpay('+i+')">إلغاء</button>':'')+'</td></tr>'}).join('');
   return'<div class="card"><label>شهر التحصيل</label><input type="month" value="'+esc(m)+'" onchange="S.collectMonth=this.value||CUR;render()"></div>'+
@@ -234,7 +255,7 @@ function vCollect(){
   '<div class="card" style="margin-top:12px">'+(rows?'<p style="color:var(--mute);margin:0 0 8px">اكتبي المبلغ اللي اتدفع فعلاً (أقل أو أكتر من القسط) واضغطي تسجيل.</p><table><tr><th>المستفيد</th><th>المبلغ</th><th></th></tr>'+rows+'</table>':(S.cq?'لا نتائج مطابقة للبحث.':'لا أقساط مستحقة في هذا الشهر.'))+'</div>'
 }
 function payAmt(i){var l=D.loans[i],a=N(document.getElementById('am'+i).value);if(a<=0){toast('اكتبي مبلغاً أكبر من صفر');return}
-  l.paid=l.paid||{};var old=l.paid[S.collectMonth],t=old?String(old).charAt(0):'c';l.paid[S.collectMonth]=(a===N(l.monthly))?t:t+':'+a;save();render();toast('تم التسجيل')}
+  l.paid=l.paid||{};var old=l.paid[S.collectMonth],t=old?String(old).charAt(0):'c';l.paid[S.collectMonth]=(Math.abs(a-expAt(l,S.collectMonth))<0.001)?t:t+':'+a;save();render();toast('تم التسجيل')}
 function unpay(i){var l=D.loans[i];if(l.paid)delete l.paid[S.collectMonth];save();render()}
 // ---------- الدعم ----------
 function vFund(){
@@ -270,13 +291,13 @@ function editFund(i){var f=D.fund[i],a=prompt('المبلغ (ج.م)',f.amount);i
 var DEFMSG='أهلاً {name}، نذكّرك بموعد سداد قسط شهر {month} بمبلغ {amount} ج.م. شكراً لالتزامك.';
 function waNum(p){var d=String(p||'').replace(/\D/g,'');if(d.indexOf('00')===0)d=d.slice(2);else if(d.charAt(0)==='0')d='20'+d.slice(1);return d.length>=11?d:''}
 function remTarget(){return S.rm||(now.getDate()>=25?ymStr(ym(CUR)+1):CUR)}
-function waLink(l,t){var tx=(D.msg||DEFMSG).replace(/\{name\}/g,l.owner).replace(/\{month\}/g,ymLabel(t)).replace(/\{amount\}/g,Math.round(N(l.monthly)));return'https://wa.me/'+waNum(l.phone)+'?text='+encodeURIComponent(tx)}
+function waLink(l,t){var tx=(D.msg||DEFMSG).replace(/\{name\}/g,l.owner).replace(/\{month\}/g,ymLabel(t)).replace(/\{amount\}/g,Math.round(expAt(l,t)));return'https://wa.me/'+waNum(l.phone)+'?text='+encodeURIComponent(tx)}
 function markSent(i){var l=D.loans[i],t=remTarget();l.sent=l.sent||{};l.sent[t]=1;save();setTimeout(render,400)}
 function vRemind(){
   var t=remTarget(),tv=ym(t),rows='',cnt=0;
-  D.loans.forEach(function(l,i){var st=ym(l.start),n=calc(l).n;if(st==null||tv<st||tv>st+n-1||(pAmt(l,t)>=N(l.monthly)||calc(l).done))return;
+  D.loans.forEach(function(l,i){var st=ym(l.start),n=calc(l).n;if(st==null||tv<st||tv>st+n-1||(pAmt(l,t)>=expAt(l,t)-0.001||calc(l).done))return;
     var num=waNum(l.phone),sent=l.sent&&l.sent[t];cnt++;
-    rows+='<tr><td><b>'+esc(l.owner)+'</b><br><span style="color:var(--mute)">'+esc(l.phone||'بدون رقم')+'</span></td><td>'+money(l.monthly)+'</td><td>'+(num?'<a class="'+(sent?'l':'b')+'" style="'+(sent?'padding:8px 14px;border-radius:10px;display:inline-block;text-decoration:none;border:1px solid var(--line);background:var(--mist);color:var(--navy2)':'')+'" target="_blank" rel="noopener" href="'+waLink(l,t)+'" onclick="markSent('+i+')">'+(sent?'أُرسلت ✓':'واتساب')+'</a>':'<span class="tag bad">رقم غير صالح</span>')+'</td></tr>'});
+    rows+='<tr><td><b>'+esc(l.owner)+'</b><br><span style="color:var(--mute)">'+esc(l.phone||'بدون رقم')+'</span></td><td>'+money(expAt(l,t))+'</td><td>'+(num?'<a class="'+(sent?'l':'b')+'" style="'+(sent?'padding:8px 14px;border-radius:10px;display:inline-block;text-decoration:none;border:1px solid var(--line);background:var(--mist);color:var(--navy2)':'')+'" target="_blank" rel="noopener" href="'+waLink(l,t)+'" onclick="markSent('+i+')">'+(sent?'أُرسلت ✓':'واتساب')+'</a>':'<span class="tag bad">رقم غير صالح</span>')+'</td></tr>'});
   return'<div class="card"><label>شهر السداد المطلوب التذكير به</label><input type="month" value="'+esc(t)+'" onchange="S.rm=this.value||null;render()">'+
   '<p style="color:var(--mute);margin:8px 0 0">التذكيرات بتبدأ يوم 25 من الشهر اللي قبل شهر السداد، وبتستمر لحد آخر قسط. اللي سدد الشهر ده مش بيظهر.'+(now.getDate()<25&&!S.rm?' النهارده قبل يوم 25، فالمعروض هو الشهر الحالي.':'')+'</p></div>'+
   '<div class="card"><h2>مطلوب تذكيرهم ('+cnt+')</h2>'+(rows?'<table><tr><th>المستفيد</th><th>القسط</th><th></th></tr>'+rows+'</table>':'لا أحد مطلوب تذكيره في هذا الشهر.')+'</div>'+
@@ -300,7 +321,7 @@ function vApplicant(){
     var l=ON?AL:D.loans.filter(function(x){return x.no===AR})[0];
     if(!l)res='<div class="card">لم نجد قرضاً بهذه البيانات. راجعي رقم القرض وآخر 4 أرقام من الموبايل المسجل.</div>';
     else{var c=calc(l);res='<div class="card"><div class="loan">'+(l.photo?'<img src="'+l.photo+'" alt="">':'<div class="ph"></div>')+'<div><b>'+esc(l.owner)+'</b><br><span style="color:var(--mute)">'+esc(l.activity)+'</span></div></div>'+
-     '<div class="bar"><i style="width:'+(c.n?Math.round(c.paid/c.n*100):0)+'%"></i></div><div class="grid"><div class="stat"><b>'+money(l.total)+'</b><span>إجمالي التمويل</span></div><div class="stat"><b>'+money(l.monthly)+'</b><span>القسط الشهري</span></div>'+
+     '<div class="bar"><i style="width:'+(c.n?Math.round(c.paid/c.n*100):0)+'%"></i></div><div class="grid"><div class="stat"><b>'+money(l.total)+'</b><span>إجمالي التمويل</span></div><div class="stat"><b style="font-size:14px">'+planText(l)+'</b><span>القسط الشهري</span></div>'+
      '<div class="stat"><b>'+c.paid+' من '+c.n+'</b><span>أقساط مسددة</span></div><div class="stat"><b>'+money(c.rem)+'</b><span>المتبقي</span></div></div>'+
      (c.done?'<p class="tag ok">تم سداد القرض بالكامل</p>':'<p>القسط القادم: <b>'+ymLabel(c.next)+'</b></p>')+
      (c.missed?'<p style="color:var(--bad)">أشهر لم تُسدد: '+c.missedList.map(ymLabel).join('، ')+' — ناقص '+money(c.short)+'</p>':'')+'</div>'}
